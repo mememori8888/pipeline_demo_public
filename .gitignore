@@ -1,0 +1,24 @@
+# Secrets and local environment
+.env
+.env.*
+service_account.json
+
+# Local databases and generated storage
+*.db
+*.db-journal
+*.sqlite3
+chroma_vector_store/
+ci_chroma_vector_store/
+
+# Generated input/output artifacts
+output_txts/
+temp_gdrive_doc_*.pdf
+
+# Python caches and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.ENV/
