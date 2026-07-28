@@ -1,7 +1,7 @@
 import os
 import sys
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, field_validator
 
 class Settings(BaseSettings):
     # 【🔥絶対ガード：古いキーのハードコードを完全消去】
@@ -22,6 +22,20 @@ class Settings(BaseSettings):
     
     # LLM Settings
     DEFAULT_MODEL_ID: str = Field(default="gemini-2.5-flash")
+
+    @field_validator(
+        "GEMINI_API_KEY",
+        "YOUTUBE_API_KEY",
+        "ENCRYPTION_KEY",
+        "GOOGLE_DRIVE_INPUT_FOLDER_ID",
+        "GOOGLE_DRIVE_OUTPUT_FOLDER_ID",
+        mode="before",
+    )
+    @classmethod
+    def strip_env_values(cls, value):
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
     # Pydantic Settingsに、カレントディレクトリの「.env」を強制的に探しに行かせる明示的定義
     model_config = SettingsConfigDict(
