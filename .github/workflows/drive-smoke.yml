@@ -1,0 +1,84 @@
+name: Drive Smoke Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  drive-smoke:
+    name: Google Drive smoke test
+    runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}"
+      ENCRYPTION_KEY: "${{ secrets.ENCRYPTION_KEY }}"
+      YOUTUBE_API_KEY: "${{ secrets.YOUTUBE_API_KEY }}"
+      GOOGLE_DRIVE_INPUT_FOLDER_ID: "${{ secrets.GOOGLE_DRIVE_INPUT_FOLDER_ID }}"
+      GOOGLE_DRIVE_OUTPUT_FOLDER_ID: "${{ secrets.GOOGLE_DRIVE_OUTPUT_FOLDER_ID }}"
+      GOOGLE_APPLICATION_CREDENTIALS: "${{ runner.temp }}/service_account.json"
+      SQLITE_DB_PATH: "${{ runner.temp }}/shared_tenant_store.db"
+      CHROMA_DB_DIR: "${{ runner.temp }}/chroma_vector_store"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Restore service account
+        run: |
+          cat > "$GOOGLE_APPLICATION_CREDENTIALS" <<'JSON'
+          ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          JSON
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify Drive folders
+        run: |
+          python - <<'PY'
+          import os
+          import time
+          from app.services.batch_processor import get_gdrive_service, upload_markdown_to_gdrive
+
+          service = get_gdrive_service()
+          input_folder = os.environ["GOOGLE_DRIVE_INPUT_FOLDER_ID"]
+          output_folder = os.environ["GOOGLE_DRIVE_OUTPUT_FOLDER_ID"]
+
+          for label, folder_id in (("input", input_folder), ("output", output_folder)):
+              meta = service.files().get(
+                  fileId=folder_id,
+                  fields="id, name, driveId, capabilities(canListChildren, canAddChildren)",
+                  supportsAllDrives=True,
+              ).execute()
+              caps = meta.get("capabilities", {})
+              print(f"{label}_folder={meta.get('name')} canList={caps.get('canListChildren')} canAdd={caps.get('canAddChildren')}")
+
+          files = service.files().list(
+              q=f"'{input_folder}' in parents and trashed = false",
+              fields="files(id, name, mimeType)",
+              pageSize=10,
+              includeItemsFromAllDrives=True,
+              supportsAllDrives=True,
+          ).execute().get("files", [])
+          print(f"input_file_count_sample={len(files)}")
+
+          created = upload_markdown_to_gdrive(
+              file_name=f"github_actions_drive_smoke_{int(time.time())}.md",
+              content="# GitHub Actions Drive smoke test\nThis file is moved to trash immediately.\n",
+              folder_id=output_folder,
+              drive_service=service,
+          )
+          print(f"created_test_file={created.get('file_name')}")
+          service.files().update(
+              fileId=created["file_id"],
+              body={"trashed": True},
+              supportsAllDrives=True,
+          ).execute()
+          print("trashed_test_file=true")
+          PY
