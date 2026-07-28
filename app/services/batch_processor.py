@@ -7,6 +7,7 @@ import time
 import re
 from typing import List, Optional, Tuple
 from pydantic import BaseModel
+import google.auth
 from google import genai
 from google.genai import errors
 from app.core.config import settings
@@ -35,11 +36,12 @@ class FilePayload(BaseModel):
 # 🔑 1. Google ドライブ API 認証
 # ==================================================
 def get_gdrive_service():
-    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service_account.json")
-    if not os.path.exists(cred_path):
-        raise FileNotFoundError(f"[❌ 致命的] 認証ファイル（{cred_path}）が見当たりません。")
     scopes = ["https://www.googleapis.com/auth/drive"]
-    creds = service_account.Credentials.from_service_account_file(cred_path, scopes=scopes)
+    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service_account.json")
+    if os.path.exists(cred_path):
+        creds = service_account.Credentials.from_service_account_file(cred_path, scopes=scopes)
+    else:
+        creds, _ = google.auth.default(scopes=scopes)
     return build('drive', 'v3', credentials=creds)
 
 
