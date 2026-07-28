@@ -13,9 +13,9 @@ jobs:
       YOUTUBE_API_KEY: "${{ secrets.YOUTUBE_API_KEY }}"
       GOOGLE_DRIVE_INPUT_FOLDER_ID: "${{ secrets.GOOGLE_DRIVE_INPUT_FOLDER_ID }}"
       GOOGLE_DRIVE_OUTPUT_FOLDER_ID: "${{ secrets.GOOGLE_DRIVE_OUTPUT_FOLDER_ID }}"
-      GOOGLE_APPLICATION_CREDENTIALS: "${{ runner.temp }}/service_account.json"
-      SQLITE_DB_PATH: "${{ runner.temp }}/shared_tenant_store.db"
-      CHROMA_DB_DIR: "${{ runner.temp }}/chroma_vector_store"
+      GOOGLE_APPLICATION_CREDENTIALS: "/tmp/service_account.json"
+      SQLITE_DB_PATH: "/tmp/shared_tenant_store.db"
+      CHROMA_DB_DIR: "/tmp/chroma_vector_store"
       PYTHONUNBUFFERED: "1"
 
     steps:
