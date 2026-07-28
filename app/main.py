@@ -28,9 +28,18 @@ app.add_middleware(
 )
 
 
+def health_payload():
+    return {"status": "ok", "service": "pipeline_demo"}
+
+
 @app.get("/healthz", summary="Lightweight health check")
 async def healthz():
-    return {"status": "ok", "service": "pipeline_demo"}
+    return health_payload()
+
+
+@app.get("/api/healthz", summary="Lightweight health check")
+async def api_healthz():
+    return health_payload()
 
 
 # ==================================================
