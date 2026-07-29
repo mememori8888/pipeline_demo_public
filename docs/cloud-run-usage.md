@@ -2,11 +2,11 @@
 
 ## URL
 
-- Public operator console: `http://34.84.106.184/`
-- Public health check: `http://34.84.106.184/api/healthz`
+- Public operator console: `https://34.84.106.184.sslip.io/`
+- Public health check: `https://34.84.106.184.sslip.io/api/healthz`
 - Cloud Run service URL: `https://pipeline-demo-api-xebbfpgofa-an.a.run.app/`
 
-The Cloud Run service itself is private because the current deployment service account does not have `run.services.setIamPolicy`. The public operator console is the same container image running on Compute Engine with the `drive-batch-operator` service account.
+The Cloud Run service itself is private because the current deployment service account does not have `run.services.setIamPolicy`. The public operator console is the same container image running on Compute Engine with the `drive-batch-operator` service account. HTTPS is terminated by Caddy on the VM using `sslip.io`.
 
 ## Authentication
 
@@ -23,7 +23,7 @@ With curl:
 
 ```bash
 curl -H "X-API-Key: $APP_API_KEY" \
-  http://34.84.106.184/api/v1/drive/status
+  https://34.84.106.184.sslip.io/api/v1/drive/status
 ```
 
 ## Google Drive Batch Processing
@@ -37,7 +37,7 @@ curl -H "X-API-Key: $APP_API_KEY" \
 7. Use `limit_count=1` for the first smoke test.
 8. Check the configured output Drive folder for generated Markdown files.
 
-The operator console at `http://34.84.106.184/` provides the same flow with buttons:
+The operator console at `https://34.84.106.184.sslip.io/` provides the same flow with buttons:
 
 1. Paste `APP_API_KEY`.
 2. Click `保存`.
