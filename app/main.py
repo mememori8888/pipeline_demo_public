@@ -1,8 +1,11 @@
 import os
 import json
 import uuid
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks
+import secrets
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional
 
@@ -12,7 +15,7 @@ from app.interceptors.pii_masking import pii_interceptor
 from app.repositories.crypto_repo import tenant_repository
 from app.services.llm_factory import ai_factory
 from app.services.strategy_speed import StrategyProvider
-from app.services.batch_processor import extract_gdrive_folder_id, prepare_batch_files, start_enterprise_batch_pipeline
+from app.services.batch_processor import extract_gdrive_folder_id, get_gdrive_service, prepare_batch_files, start_enterprise_batch_pipeline
 
 # YouTubeチャンネル一括解析サービスをインポート
 from app.services.youtube_processor import fetch_channel_videos, start_youtube_channel_pipeline
@@ -28,8 +31,24 @@ app.add_middleware(
 )
 
 
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def require_api_key(api_key: Optional[str] = Security(api_key_header)) -> None:
+    expected_key = settings.APP_API_KEY
+    if not expected_key:
+        return
+    if not api_key or not secrets.compare_digest(api_key, expected_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
+
+
 def health_payload():
     return {"status": "ok", "service": "pipeline_demo"}
+
+
+@app.get("/api", include_in_schema=False)
+async def api_root():
+    return RedirectResponse(url="/api/docs")
 
 
 @app.get("/healthz", summary="Lightweight health check")
@@ -40,6 +59,53 @@ async def healthz():
 @app.get("/api/healthz", summary="Lightweight health check")
 async def api_healthz():
     return health_payload()
+
+
+@app.get("/api/v1/drive/status", summary="Google Drive folder connectivity status")
+async def drive_status(_auth: None = Depends(require_api_key)):
+    input_folder_id = extract_gdrive_folder_id(settings.GOOGLE_DRIVE_INPUT_FOLDER_ID)
+    output_folder_id = extract_gdrive_folder_id(settings.GOOGLE_DRIVE_OUTPUT_FOLDER_ID)
+    if not input_folder_id or not output_folder_id:
+        raise HTTPException(status_code=400, detail="Google Drive input/output folder IDs are not configured.")
+
+    try:
+        drive_service = get_gdrive_service()
+        input_meta = drive_service.files().get(
+            fileId=input_folder_id,
+            fields="id,name,capabilities(canListChildren,canAddChildren)",
+            supportsAllDrives=True,
+        ).execute()
+        output_meta = drive_service.files().get(
+            fileId=output_folder_id,
+            fields="id,name,capabilities(canListChildren,canAddChildren)",
+            supportsAllDrives=True,
+        ).execute()
+        input_files = drive_service.files().list(
+            q=f"'{input_folder_id}' in parents and trashed = false",
+            fields="files(id,name,mimeType),nextPageToken",
+            pageSize=10,
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
+        ).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Google Drive connectivity check failed: {str(exc)}")
+
+    return {
+        "status": "ok",
+        "input_folder": {
+            "id": input_folder_id,
+            "name": input_meta.get("name"),
+            "can_list": input_meta.get("capabilities", {}).get("canListChildren"),
+            "sample_count": len(input_files.get("files", [])),
+            "has_more": bool(input_files.get("nextPageToken")),
+            "sample_files": input_files.get("files", []),
+        },
+        "output_folder": {
+            "id": output_folder_id,
+            "name": output_meta.get("name"),
+            "can_add": output_meta.get("capabilities", {}).get("canAddChildren"),
+        },
+    }
 
 
 # ==================================================
@@ -92,6 +158,7 @@ class DecryptRequest(BaseModel):
 
 @app.post("/api/v1/schema/generate", summary="書類から最適な抽出スキーマをAIが自作して永続化するAPI")
 async def generate_schema_from_doc(
+    _auth: None = Depends(require_api_key),
     tenant_id: str = Form(..., description="クライアント企業ID"),
     file: UploadFile = File(..., description="スキーマの手本にするサンプル手書き書類/PDF")
 ):
@@ -119,6 +186,7 @@ async def generate_schema_from_doc(
 # ==================================================
 @app.post("/api/v1/document/process", summary="【コア機能】PIIガード付き本解析・構造化API")
 async def process_document(
+    _auth: None = Depends(require_api_key),
     tenant_id: str = Form(...),
     industry_type: str = Form(...),
     speed_mode: str = Form("scan"),
@@ -168,7 +236,7 @@ async def process_document(
         raise HTTPException(status_code=500, detail=f"パイプラインエラー: {str(e)}")
 
 @app.post("/api/v1/document/decrypt", summary="【リバート機能】権限保持者へのセキュアなデマスキング（個人情報復元）API")
-async def decrypt_document_data(request: DecryptRequest):
+async def decrypt_document_data(request: DecryptRequest, _auth: None = Depends(require_api_key)):
     try:
         token_map = tenant_repository.load_pii_mapping(request.document_id, request.tenant_id)
         if not token_map:
@@ -186,6 +254,7 @@ async def decrypt_document_data(request: DecryptRequest):
 @app.post("/api/v1/document/batch-process", summary="【枚数コントロール付き】大量書類の一括非同期バッチ解析API")
 async def batch_process_documents(
     background_tasks: BackgroundTasks,
+    _auth: None = Depends(require_api_key),
     storage_type: str = Form(default="google_drive"),
     target_path: str = Form(default=""),
     limit_count: Optional[int] = Form(default=None),
@@ -244,6 +313,7 @@ async def batch_process_documents(
 @app.post("/api/v1/document/youtube-channel-process", summary="【時事分析ニュース生成】YouTubeチャンネル動画一括非同期要約マシーン")
 async def batch_process_youtube_channel(
     background_tasks: BackgroundTasks,
+    _auth: None = Depends(require_api_key),
     tenant_id: str = Form(..., description="クライアント企業ID"),
     channel_url: str = Form(..., description="一括リサーチしたいYouTubeチャンネルのURL"),
     limit_count: Optional[int] = Form(default=None, description="【本数制限】最新の動画から何本処理するか（例: 3）。空欄ならチャンネル内全件処理。")

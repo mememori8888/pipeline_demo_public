@@ -15,6 +15,7 @@ jobs:
     env:
       GEMINI_API_KEY: "dummy-ci-key"
       ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef"
+      APP_API_KEY: "dummy-ci-app-key"
       SQLITE_DB_PATH: "/tmp/shared_tenant_store.db"
       CHROMA_DB_DIR: "/tmp/chroma_vector_store"
       GOOGLE_DRIVE_INPUT_FOLDER_ID: ""

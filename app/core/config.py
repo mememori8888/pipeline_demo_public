@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     
     # Security (AES-256用 暗号化鍵。これも未指定時はエラーにするか安全なデフォルト値を設定)
     ENCRYPTION_KEY: str = Field(..., description="Encryption key for local PII mappings")
+    APP_API_KEY: str = Field(default="", description="Optional API key for public Cloud Run access")
     
     # DB Paths
     SQLITE_DB_PATH: str = Field(default="shared_tenant_store.db")
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
         "GEMINI_API_KEY",
         "YOUTUBE_API_KEY",
         "ENCRYPTION_KEY",
+        "APP_API_KEY",
         "GOOGLE_DRIVE_INPUT_FOLDER_ID",
         "GOOGLE_DRIVE_OUTPUT_FOLDER_ID",
         mode="before",
