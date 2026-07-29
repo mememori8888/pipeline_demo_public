@@ -4,7 +4,7 @@ import uuid
 import secrets
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional
@@ -16,6 +16,7 @@ from app.repositories.crypto_repo import tenant_repository
 from app.services.llm_factory import ai_factory
 from app.services.strategy_speed import StrategyProvider
 from app.services.batch_processor import extract_gdrive_folder_id, get_gdrive_service, prepare_batch_files, start_enterprise_batch_pipeline
+from app.ui import render_operator_console
 
 # YouTubeチャンネル一括解析サービスをインポート
 from app.services.youtube_processor import fetch_channel_videos, start_youtube_channel_pipeline
@@ -44,6 +45,16 @@ async def require_api_key(api_key: Optional[str] = Security(api_key_header)) -> 
 
 def health_payload():
     return {"status": "ok", "service": "pipeline_demo"}
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def index():
+    return HTMLResponse(render_operator_console())
+
+
+@app.get("/app", response_class=HTMLResponse, include_in_schema=False)
+async def operator_app():
+    return HTMLResponse(render_operator_console())
 
 
 @app.get("/api", include_in_schema=False)
