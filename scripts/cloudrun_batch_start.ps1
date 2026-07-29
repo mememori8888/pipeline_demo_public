@@ -1,24 +1,11 @@
 param(
     [int]$LimitCount = 1,
     [string]$PromptPreset = "ocr_markdown",
-    [string]$Project = "geoai-cloudrun",
-    [string]$Region = "asia-northeast1",
-    [string]$Service = "pipeline-demo-api",
-    [string]$EnvFile = "D:\python\pipeline_demo\pipeline_demo\.env",
-    [string]$CloudSdkConfig = ""
+    [string]$BaseUrl = "https://pipeline-demo-api-xebbfpgofa-an.a.run.app",
+    [string]$EnvFile = "D:\python\pipeline_demo\pipeline_demo\.env"
 )
 
 $ErrorActionPreference = "Stop"
-
-if (-not $CloudSdkConfig) {
-    $candidate = Join-Path $env:TEMP "codex-gcloud-pipeline-demo"
-    if (Test-Path $candidate) {
-        $CloudSdkConfig = $candidate
-    }
-}
-if ($CloudSdkConfig) {
-    $env:CLOUDSDK_CONFIG = $CloudSdkConfig
-}
 
 function Read-DotEnvValue {
     param([string]$Path, [string]$Name)
@@ -46,14 +33,12 @@ if ([string]::IsNullOrWhiteSpace($apiKey)) {
     throw "APP_API_KEY was not found in $EnvFile"
 }
 
-$url = gcloud run services describe $Service --project $Project --region $Region --format="value(status.url)"
-$token = gcloud auth print-identity-token --audiences=$url
+$baseUrl = $BaseUrl.TrimEnd("/")
 
 curl.exe -sS `
-    -H "Authorization: Bearer $token" `
     -H "X-API-Key: $apiKey" `
     -X POST `
     -F "storage_type=google_drive" `
     -F "limit_count=$LimitCount" `
     -F "prompt_preset=$PromptPreset" `
-    "$url/api/v1/document/batch-process"
+    "$baseUrl/api/v1/document/batch-process"

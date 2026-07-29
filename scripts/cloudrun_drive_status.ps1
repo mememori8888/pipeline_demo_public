@@ -1,22 +1,9 @@
 param(
-    [string]$Project = "geoai-cloudrun",
-    [string]$Region = "asia-northeast1",
-    [string]$Service = "pipeline-demo-api",
-    [string]$EnvFile = "D:\python\pipeline_demo\pipeline_demo\.env",
-    [string]$CloudSdkConfig = ""
+    [string]$BaseUrl = "https://pipeline-demo-api-xebbfpgofa-an.a.run.app",
+    [string]$EnvFile = "D:\python\pipeline_demo\pipeline_demo\.env"
 )
 
 $ErrorActionPreference = "Stop"
-
-if (-not $CloudSdkConfig) {
-    $candidate = Join-Path $env:TEMP "codex-gcloud-pipeline-demo"
-    if (Test-Path $candidate) {
-        $CloudSdkConfig = $candidate
-    }
-}
-if ($CloudSdkConfig) {
-    $env:CLOUDSDK_CONFIG = $CloudSdkConfig
-}
 
 function Read-DotEnvValue {
     param([string]$Path, [string]$Name)
@@ -44,10 +31,9 @@ if ([string]::IsNullOrWhiteSpace($apiKey)) {
     throw "APP_API_KEY was not found in $EnvFile"
 }
 
-$url = gcloud run services describe $Service --project $Project --region $Region --format="value(status.url)"
-$token = gcloud auth print-identity-token --audiences=$url
+$baseUrl = $BaseUrl.TrimEnd("/")
 
 Invoke-RestMethod `
-    -Uri "$url/api/v1/drive/status" `
-    -Headers @{ Authorization = "Bearer $token"; "X-API-Key" = $apiKey } `
+    -Uri "$baseUrl/api/v1/drive/status" `
+    -Headers @{ "X-API-Key" = $apiKey } `
     -TimeoutSec 60

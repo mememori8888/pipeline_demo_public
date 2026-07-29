@@ -4,11 +4,11 @@ For the full implementation history and review notes, see `docs/implementation-r
 
 ## URL
 
-- Public operator console: `https://34.84.106.184.sslip.io/`
-- Public health check: `https://34.84.106.184.sslip.io/api/healthz`
-- Cloud Run service URL: `https://pipeline-demo-api-xebbfpgofa-an.a.run.app/`
+- Public operator console: `https://pipeline-demo-api-xebbfpgofa-an.a.run.app/`
+- Public health check: `https://pipeline-demo-api-xebbfpgofa-an.a.run.app/api/healthz`
+- API docs: `https://pipeline-demo-api-xebbfpgofa-an.a.run.app/api/docs`
 
-The Cloud Run service itself is private because the current deployment service account does not have `run.services.setIamPolicy`. The public operator console is the same container image running on Compute Engine with the `drive-batch-operator` service account. HTTPS is terminated by Caddy on the VM using `sslip.io`.
+The app is now served directly by Cloud Run. The temporary Compute Engine + Caddy public endpoint has been removed.
 
 ## Authentication
 
@@ -25,7 +25,7 @@ With curl:
 
 ```bash
 curl -H "X-API-Key: $APP_API_KEY" \
-  https://34.84.106.184.sslip.io/api/v1/drive/status
+  https://pipeline-demo-api-xebbfpgofa-an.a.run.app/api/v1/drive/status
 ```
 
 ## Google Drive Batch Processing
@@ -39,7 +39,7 @@ curl -H "X-API-Key: $APP_API_KEY" \
 7. Use `limit_count=1` for the first smoke test.
 8. Check the configured output Drive folder for generated Markdown files.
 
-The operator console at `https://34.84.106.184.sslip.io/` provides the same flow with buttons:
+The operator console at `https://pipeline-demo-api-xebbfpgofa-an.a.run.app/` provides the same flow with buttons:
 
 1. Paste `APP_API_KEY`.
 2. Click `保存`.
@@ -47,6 +47,15 @@ The operator console at `https://34.84.106.184.sslip.io/` provides the same flow
 4. Set `処理件数`.
 5. Click `処理開始`.
 6. Click `出力を開く`.
+
+## Helper Scripts
+
+The helper scripts call the public Cloud Run URL directly and only require `APP_API_KEY` in the local env file.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\cloudrun_drive_status.ps1
+powershell -ExecutionPolicy Bypass -File scripts\cloudrun_batch_start.ps1 -LimitCount 1
+```
 
 ## Useful Endpoints
 
