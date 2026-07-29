@@ -1,5 +1,7 @@
 # Cloud Run Usage
 
+For the full implementation history and review notes, see `docs/implementation-report-2026-07-29.md`.
+
 ## URL
 
 - Public operator console: `https://34.84.106.184.sslip.io/`
