@@ -20,8 +20,9 @@ class Settings(BaseSettings):
     CHROMA_DB_DIR: str = Field(default="./chroma_vector_store")
     GOOGLE_DRIVE_INPUT_FOLDER_ID: str = Field(default="")
     GOOGLE_DRIVE_OUTPUT_FOLDER_ID: str = Field(default="")
-    BATCH_CHUNK_SIZE: int = Field(default=10, description="Number of input files to process before uploading a partial Markdown result")
+    BATCH_CHUNK_SIZE: int = Field(default=5, description="Number of input files to process before uploading a partial Markdown result")
     BATCH_SYNTHESIS_MAX_CHARS: int = Field(default=600000, description="Maximum source characters to send into the final synthesis call")
+    GEMINI_HTTP_TIMEOUT_MS: int = Field(default=300000, description="Gemini API request timeout in milliseconds")
     
     # LLM Settings
     DEFAULT_MODEL_ID: str = Field(default="gemini-2.5-flash")

@@ -107,6 +107,7 @@ Google Drive の入力フォルダと出力フォルダを分けて使う構成�
 - `batch_<job_id>_part_001_integrated.md` のような分割統合ファイルを順次 Drive に保存する
 - 最後に `batch_<job_id>_final_integrated.md` を保存する
 - final は短いサマリーではなく、分割統合ファイル群をさらに読み合わせた統合原稿として生成する
+- Gemini 呼び出しには timeout を設定し、固まった場合は error Markdown を Drive に残す
 
 ### 補助スクリプト
 
@@ -121,7 +122,7 @@ Cloud Run にデプロイ済みで、現在の公開経路は Cloud Run のみ�
 - Project: `geoai-cloudrun`
 - Region: `asia-northeast1`
 - Service: `pipeline-demo-api`
-- Latest verified revision: `pipeline-demo-api-00006-l4n`
+- Latest verified revision: `pipeline-demo-api-00007-shb`
 - Runtime service account: `drive-batch-operator@geoai-cloudrun.iam.gserviceaccount.com`
 - Public URL: `https://pipeline-demo-api-xebbfpgofa-an.a.run.app/`
 - Large batch settings: timeout `3600s`, memory `1Gi`, concurrency `1`
@@ -171,7 +172,7 @@ Cloud Run の前段に Load Balancer + serverless NEG を試したが、Cloud Ru
 8. `出力を開く` から出力 Drive フォルダを確認する
 9. 処理中は `batch_<job_id>_part_XXX_integrated.md`、完了時は `batch_<job_id>_final_integrated.md` を確認する
 
-分割サイズは通常 `10` のままでよい。92件なら、おおむね10個の part ファイルと1個の final ファイルが出る。
+分割サイズは通常 `5` のままでよい。92件なら、おおむね19個の part ファイルと1個の final ファイルが出る。
 
 ## 5. 検証結果
 
@@ -209,6 +210,7 @@ Cloud Run の前段に Load Balancer + serverless NEG を試したが、Cloud Ru
 - `Add implementation review report`
 - `Switch docs and scripts to Cloud Run-only public URL`
 - `Add chunked integration outputs for large Drive batches`
+- `Add Gemini timeout guard for Drive batch integrations`
 
 ## 7. 注意点
 

@@ -1,6 +1,6 @@
 param(
     [int]$LimitCount = 0,
-    [int]$ChunkSize = 10,
+    [int]$ChunkSize = 5,
     [string]$PromptPreset = "ocr_markdown",
     [string]$BaseUrl = "https://pipeline-demo-api-xebbfpgofa-an.a.run.app",
     [string]$EnvFile = "D:\python\pipeline_demo\pipeline_demo\.env"

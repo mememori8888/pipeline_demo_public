@@ -349,7 +349,7 @@ def render_operator_console() -> str:
               </label>
               <label>
                 分割サイズ
-                <input id="chunkSize" type="number" min="1" step="1" value="10">
+                <input id="chunkSize" type="number" min="1" step="1" value="5">
               </label>
               <label>
                 プリセット

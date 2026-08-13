@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple
 from pydantic import BaseModel
 import google.auth
 from google import genai
-from google.genai import errors
+from google.genai import types
 from app.core.config import settings
 
 # Google公式 API クライアントライブラリ
@@ -18,7 +18,10 @@ from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2 import service_account
 
 # Gemini API クライアントの初期化
-client = genai.Client(api_key=settings.GEMINI_API_KEY)
+client = genai.Client(
+    api_key=settings.GEMINI_API_KEY,
+    http_options=types.HttpOptions(timeout=settings.GEMINI_HTTP_TIMEOUT_MS),
+)
 
 # 成果物を格納するローカルの安全な本棚フォルダ
 OUTPUT_DIR = "output_txts"
@@ -185,6 +188,44 @@ def scan_storage(storage_type: str, target_path: str, limit_count: Optional[int]
 # ==================================================
 SEMAPHORE_LIMIT = 3
 semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
+TEMPORARY_ERROR_HINTS = (
+    "503",
+    "429",
+    "408",
+    "504",
+    "UNAVAILABLE",
+    "demand",
+    "timeout",
+    "timed out",
+    "ReadTimeout",
+)
+
+
+def is_temporary_gemini_error(err_msg: str) -> bool:
+    lowered = err_msg.lower()
+    return any(hint.lower() in lowered for hint in TEMPORARY_ERROR_HINTS)
+
+
+async def generate_content_text_with_retry(contents_input, purpose: str, max_retries: int = 3) -> str:
+    base_delay = 5
+    for attempt in range(max_retries):
+        try:
+            print(f"[Gemini start] {purpose} ({attempt + 1}/{max_retries})")
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=settings.DEFAULT_MODEL_ID,
+                contents=contents_input,
+            )
+            print(f"[Gemini done] {purpose}")
+            return response.text
+        except Exception as g_err:
+            err_msg = str(g_err)
+            if is_temporary_gemini_error(err_msg) and attempt < max_retries - 1:
+                sleep_time = base_delay * (attempt + 1)
+                print(f"[⏳ Gemini一時エラー] {purpose}: {err_msg} / {sleep_time}秒後にリトライします。")
+                await asyncio.sleep(sleep_time)
+                continue
+            raise RuntimeError(f"{purpose} のGemini生成に失敗しました: {err_msg}") from g_err
 
 async def upload_and_process_with_retry(file: FilePayload, system_prompt: str, drive_service=None) -> str:
     async with semaphore:
@@ -205,27 +246,10 @@ async def upload_and_process_with_retry(file: FilePayload, system_prompt: str, d
                     system_prompt
                 ]
 
-            max_retries = 3
-            base_delay = 2
-            response = None
-            
-            for attempt in range(max_retries):
-                try:
-                    response = await asyncio.to_thread(
-                        client.models.generate_content,
-                        model=settings.DEFAULT_MODEL_ID,
-                        contents=contents_input,
-                    )
-                    break
-                except Exception as g_err:
-                    err_msg = str(g_err)
-                    is_temporary = "503" in err_msg or "429" in err_msg or "UNAVAILABLE" in err_msg or "demand" in err_msg
-                    if is_temporary and attempt < max_retries - 1:
-                        sleep_time = base_delay * (attempt + 1)
-                        print(f"[⏳ Google混雑検知]: 『{file.file_name}』で混雑を検知。{sleep_time}秒後に自動リトライします... ({attempt + 1}/{max_retries})")
-                        await asyncio.sleep(sleep_time)
-                    else:
-                        raise g_err
+            response_text = await generate_content_text_with_retry(
+                contents_input,
+                purpose=f"page:{file.file_name}",
+            )
 
             # 🌟 後から見返せるよう、MIMEタイプ等も記載した綺麗なぶつ切りレポート素材を作成
             return (
@@ -233,7 +257,7 @@ async def upload_and_process_with_retry(file: FilePayload, system_prompt: str, d
                 f"- **Google Drive File ID**: `{file.gdrive_file_id if file.gdrive_file_id else 'N/A'}`\n"
                 f"- **検知MIMEタイプ**: `{file.mime_type}`\n"
                 f"- **抽出ログ本文**:\n"
-                f"{response.text}\n\n"
+                f"{response_text}\n\n"
                 f"--- \n\n"
             )
 
@@ -279,15 +303,13 @@ async def start_enterprise_batch_pipeline(
     )
 
     async def synthesize_markdown(source_context: str, prompt: str) -> str:
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=settings.DEFAULT_MODEL_ID,
-            contents=[
+        return await generate_content_text_with_retry(
+            [
                 f"■ 統合対象データ:\n\n{source_context}",
                 prompt,
             ],
+            purpose="integration",
         )
-        return response.text
 
     async def integrate_units(units: List[str], final_prompt: str) -> str:
         current_units = units

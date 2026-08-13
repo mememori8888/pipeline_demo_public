@@ -37,7 +37,7 @@ curl -H "X-API-Key: $APP_API_KEY" \
 5. Leave `storage_type` as `google_drive`.
 6. Leave `target_path` and `output_folder_id` blank to use Cloud Run environment defaults.
 7. Leave `limit_count` blank to process every supported file in the input folder, or set it only when you intentionally want to cap the run.
-8. Use `chunk_size=10` unless you have a reason to change the batch size.
+8. Use `chunk_size=5` unless you have a reason to change the batch size.
 9. Check the configured output Drive folder for generated Markdown files.
 
 Large runs are written in stages:
@@ -60,7 +60,7 @@ The helper scripts call the public Cloud Run URL directly and only require `APP_
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\cloudrun_drive_status.ps1
-powershell -ExecutionPolicy Bypass -File scripts\cloudrun_batch_start.ps1 -ChunkSize 10
+powershell -ExecutionPolicy Bypass -File scripts\cloudrun_batch_start.ps1 -ChunkSize 5
 ```
 
 ## Useful Endpoints
