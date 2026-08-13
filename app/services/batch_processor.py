@@ -186,7 +186,7 @@ def scan_storage(storage_type: str, target_path: str, limit_count: Optional[int]
 # ==================================================
 # 🛡️ 3. 【フェーズ1：各個撃破用】多重度制限 ＆ 各頁詳細解析
 # ==================================================
-SEMAPHORE_LIMIT = 3
+SEMAPHORE_LIMIT = max(1, settings.BATCH_PAGE_CONCURRENCY)
 semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
 TEMPORARY_ERROR_HINTS = (
     "503",
@@ -206,8 +206,9 @@ def is_temporary_gemini_error(err_msg: str) -> bool:
     return any(hint.lower() in lowered for hint in TEMPORARY_ERROR_HINTS)
 
 
-async def generate_content_text_with_retry(contents_input, purpose: str, max_retries: int = 3) -> str:
-    base_delay = 5
+async def generate_content_text_with_retry(contents_input, purpose: str, max_retries: Optional[int] = None) -> str:
+    max_retries = max_retries or settings.GEMINI_MAX_RETRIES
+    base_delay = settings.GEMINI_RETRY_BASE_DELAY_SECONDS
     for attempt in range(max_retries):
         try:
             print(f"[Gemini start] {purpose} ({attempt + 1}/{max_retries})")
@@ -264,6 +265,11 @@ async def upload_and_process_with_retry(file: FilePayload, system_prompt: str, d
         except Exception as api_err:
             print(f"[❌ 解析断念] {file.file_name} エラー: {str(api_err)}")
             return f"### ❌ 解析失敗ページ: {file.file_name}\n- **理由**: {str(api_err)}\n\n--- \n\n"
+        finally:
+            delay = max(0.0, settings.BATCH_DELAY_BETWEEN_FILES_SECONDS)
+            if delay:
+                print(f"[低負荷待機] 次のファイル処理まで {delay:.1f} 秒待機します。")
+                await asyncio.sleep(delay)
 
 
 # ==================================================
@@ -382,6 +388,10 @@ async def start_enterprise_batch_pipeline(
             print(f"[✅ 分割出力完了] {part_file_name}")
             if part_gdrive_result:
                 print(f"[Google Drive part output]: {part_gdrive_result}")
+            chunk_delay = max(0.0, settings.BATCH_DELAY_BETWEEN_CHUNKS_SECONDS)
+            if chunk_delay and chunk_index < total_chunks:
+                print(f"[低負荷待機] 次の分割処理まで {chunk_delay:.1f} 秒待機します。")
+                await asyncio.sleep(chunk_delay)
 
         print("[🧠 最終統合] 分割統合ファイル群を1本の完成原稿へ統合します。")
         part_sources = [
