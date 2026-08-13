@@ -1,0 +1,13 @@
+.git
+.github
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+output_txts/
+chroma_vector_store/
+*.sqlite3
+service_account.json
+.env
+.env.*

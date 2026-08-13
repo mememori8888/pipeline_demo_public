@@ -94,10 +94,19 @@ Google Drive の入力フォルダと出力フォルダを分けて使う構成�
 - API Key をブラウザに保存
 - Drive 接続確認
 - Google Drive batch 処理開始
-- 処理件数指定
+- 処理件数指定（空欄なら全件）
+- 分割サイズ指定
 - prompt preset 選択
 - custom prompt 入力
 - 入力フォルダ/出力フォルダ/API Docs へのリンク
+
+### 大量ファイルの分割統合
+
+大量ファイルを1回の最終出力だけにすると、途中で止まった場合に成果物が残らない。そのため、batch 処理は分割統合方式に変更した。
+
+- `batch_<job_id>_part_001_integrated.md` のような分割統合ファイルを順次 Drive に保存する
+- 最後に `batch_<job_id>_final_integrated.md` を保存する
+- final は短いサマリーではなく、分割統合ファイル群をさらに読み合わせた統合原稿として生成する
 
 ### 補助スクリプト
 
@@ -112,9 +121,10 @@ Cloud Run にデプロイ済みで、現在の公開経路は Cloud Run のみ�
 - Project: `geoai-cloudrun`
 - Region: `asia-northeast1`
 - Service: `pipeline-demo-api`
-- Latest verified revision: `pipeline-demo-api-00004-9ff`
+- Latest verified revision: `pipeline-demo-api-00006-l4n`
 - Runtime service account: `drive-batch-operator@geoai-cloudrun.iam.gserviceaccount.com`
 - Public URL: `https://pipeline-demo-api-xebbfpgofa-an.a.run.app/`
+- Large batch settings: timeout `3600s`, memory `1Gi`, concurrency `1`
 
 ユーザー側で Cloud Run の `Allow public access` を有効化した後、認証なしの health check と API キー付き Drive 接続確認が Cloud Run 直で成功した。
 
@@ -156,11 +166,12 @@ Cloud Run の前段に Load Balancer + serverless NEG を試したが、Cloud Ru
 3. `保存` を押す
 4. `Drive確認` を押す
 5. 入力 Drive フォルダに PDF / 画像 / txt を入れる
-6. `処理件数` を指定する
+6. 全件処理する場合は `処理件数` を空欄にする
 7. `処理開始` を押す
 8. `出力を開く` から出力 Drive フォルダを確認する
+9. 処理中は `batch_<job_id>_part_XXX_integrated.md`、完了時は `batch_<job_id>_final_integrated.md` を確認する
 
-初回テストでは `処理件数=1` にすると安全。
+分割サイズは通常 `10` のままでよい。92件なら、おおむね10個の part ファイルと1個の final ファイルが出る。
 
 ## 5. 検証結果
 
@@ -197,6 +208,7 @@ Cloud Run の前段に Load Balancer + serverless NEG を試したが、Cloud Ru
 - `Update docs with HTTPS public URL`
 - `Add implementation review report`
 - `Switch docs and scripts to Cloud Run-only public URL`
+- `Add chunked integration outputs for large Drive batches`
 
 ## 7. 注意点
 
@@ -240,6 +252,7 @@ Cloud Console で `Allow public access` を有効化済み。以後の公開経�
 10. Cloud Run 直の URL で health / Drive 接続を確認した
 11. 一時 VM / 固定 IP / firewall を削除して Cloud Run のみに戻した
 12. 補助スクリプトとドキュメントを Cloud Run 公開 URL 前提に更新した
+13. 大量ファイル向けに、分割統合ファイルと最終統合ファイルを Drive に順次保存する方式へ変更した
 
 ## 9. 次にやるとよいこと
 

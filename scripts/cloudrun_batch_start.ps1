@@ -1,5 +1,6 @@
 param(
-    [int]$LimitCount = 1,
+    [int]$LimitCount = 0,
+    [int]$ChunkSize = 10,
     [string]$PromptPreset = "ocr_markdown",
     [string]$BaseUrl = "https://pipeline-demo-api-xebbfpgofa-an.a.run.app",
     [string]$EnvFile = "D:\python\pipeline_demo\pipeline_demo\.env"
@@ -34,11 +35,17 @@ if ([string]::IsNullOrWhiteSpace($apiKey)) {
 }
 
 $baseUrl = $BaseUrl.TrimEnd("/")
+$curlArgs = @(
+    "-sS",
+    "-H", "X-API-Key: $apiKey",
+    "-X", "POST",
+    "-F", "storage_type=google_drive",
+    "-F", "chunk_size=$ChunkSize",
+    "-F", "prompt_preset=$PromptPreset"
+)
+if ($LimitCount -gt 0) {
+    $curlArgs += @("-F", "limit_count=$LimitCount")
+}
+$curlArgs += "$baseUrl/api/v1/document/batch-process"
 
-curl.exe -sS `
-    -H "X-API-Key: $apiKey" `
-    -X POST `
-    -F "storage_type=google_drive" `
-    -F "limit_count=$LimitCount" `
-    -F "prompt_preset=$PromptPreset" `
-    "$baseUrl/api/v1/document/batch-process"
+& curl.exe @curlArgs

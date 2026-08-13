@@ -329,7 +329,7 @@ def render_operator_console() -> str:
       <section class="topbar">
         <div class="titleblock">
           <h2>Drive Batch Operator</h2>
-          <p>フォルダ状態を確認して、必要な件数だけ処理を開始します。</p>
+          <p>フォルダ状態を確認して、全件または指定件数の一括処理を開始します。</p>
         </div>
         <div id="healthPill" class="status-pill">checking</div>
       </section>
@@ -345,7 +345,11 @@ def render_operator_console() -> str:
             <div class="row">
               <label>
                 処理件数
-                <input id="limitCount" type="number" min="1" step="1" value="1">
+                <input id="limitCount" type="number" min="1" step="1" placeholder="空欄なら全件">
+              </label>
+              <label>
+                分割サイズ
+                <input id="chunkSize" type="number" min="1" step="1" value="10">
               </label>
               <label>
                 プリセット
@@ -450,6 +454,8 @@ def render_operator_console() -> str:
       form.append("storage_type", "google_drive");
       const limit = document.getElementById("limitCount").value;
       if (limit) form.append("limit_count", limit);
+      const chunkSize = document.getElementById("chunkSize").value;
+      if (chunkSize) form.append("chunk_size", chunkSize);
       form.append("prompt_preset", document.getElementById("promptPreset").value);
       const custom = document.getElementById("customPrompt").value.trim();
       if (custom) form.append("custom_prompt", custom);

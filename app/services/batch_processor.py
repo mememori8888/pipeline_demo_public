@@ -80,6 +80,33 @@ def upload_markdown_to_gdrive(file_name: str, content: str, folder_id: str, driv
     }
 
 
+def save_markdown_locally(file_name: str, content: str) -> str:
+    file_path = os.path.join(OUTPUT_DIR, file_name)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return file_path
+
+
+def read_file_bytes(file: FilePayload) -> bytes:
+    if file.gdrive_file_id:
+        drive_service = get_gdrive_service()
+        request = drive_service.files().get_media(fileId=file.gdrive_file_id)
+        file_stream = io.BytesIO()
+        downloader = MediaIoBaseDownload(file_stream, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        return file_stream.getvalue()
+
+    with open(file.local_path, "rb") as f:
+        return f.read()
+
+
+def chunk_payloads(files: List[FilePayload], chunk_size: int) -> List[List[FilePayload]]:
+    safe_chunk_size = max(1, chunk_size)
+    return [files[i:i + safe_chunk_size] for i in range(0, len(files), safe_chunk_size)]
+
+
 # ==================================================
 # 📂 2. ストレージ・スキャン
 # ==================================================
@@ -163,19 +190,7 @@ async def upload_and_process_with_retry(file: FilePayload, system_prompt: str, d
     async with semaphore:
         print(f"[⚙️ 各頁スキャン中...]: {file.file_name}")
         try:
-            if file.gdrive_file_id:
-                if not drive_service:
-                    drive_service = get_gdrive_service()
-                request = drive_service.files().get_media(fileId=file.gdrive_file_id)
-                file_stream = io.BytesIO()
-                downloader = MediaIoBaseDownload(file_stream, request)
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-                file_bytes = file_stream.getvalue()
-            else:
-                with open(file.local_path, "rb") as f:
-                    file_bytes = f.read()
+            file_bytes = await asyncio.to_thread(read_file_bytes, file)
 
             if len(file_bytes) == 0:
                 raise ValueError("ファイルが0バイトのためスキップします。")
@@ -196,7 +211,11 @@ async def upload_and_process_with_retry(file: FilePayload, system_prompt: str, d
             
             for attempt in range(max_retries):
                 try:
-                    response = client.models.generate_content(model=settings.DEFAULT_MODEL_ID, contents=contents_input)
+                    response = await asyncio.to_thread(
+                        client.models.generate_content,
+                        model=settings.DEFAULT_MODEL_ID,
+                        contents=contents_input,
+                    )
                     break
                 except Exception as g_err:
                     err_msg = str(g_err)
@@ -231,112 +250,199 @@ async def start_enterprise_batch_pipeline(
     prompt_preset: str,
     custom_prompt: Optional[str] = None,
     output_folder_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+    chunk_size: Optional[int] = None,
     **kwargs
 ) -> dict:
     start_time = time.time()
-    tenant_id = "geoai-production"
+    job_id = job_id or uuid.uuid4().hex[:8]
+    resolved_chunk_size = max(1, chunk_size or settings.BATCH_CHUNK_SIZE)
+    resolved_output_folder_id = extract_gdrive_folder_id(output_folder_id or settings.GOOGLE_DRIVE_OUTPUT_FOLDER_ID)
+    drive_service = get_gdrive_service() if resolved_output_folder_id else None
 
-    # フェーズ1用の下読み指示
     phase1_prompt = "渡された書類（画像）の文字、図表、意味を極めて詳細に文字起こしし、データ要素を過不足なく抽出して日本語で報告してください。"
+
+    base_integration_prompt = custom_prompt or (
+        "# 書籍化・統合編集最高命令\n"
+        "高度な知識書籍の編集長、兼シニアAIエグゼクティブアナリストとして振る舞ってください。\n"
+        "渡された個別下読みデータのすべてを熟読し、要点の羅列や短いサマリーではなく、"
+        "流れるような1本の統合されたMarkdown原稿として再構成してください。\n\n"
+        "## 構成\n"
+        "1. 本のタイトル\n"
+        "2. はじめに\n"
+        "3. 核心的総括\n"
+        "4. 体系的な本文\n"
+        "5. 結論と今後の展望\n\n"
+        "## 文体\n"
+        "- 完全に「である調」で統一すること。\n"
+        "- システム的な前置きは書かず、そのまま読める原稿にすること。"
+    )
+
+    async def synthesize_markdown(source_context: str, prompt: str) -> str:
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=settings.DEFAULT_MODEL_ID,
+            contents=[
+                f"■ 統合対象データ:\n\n{source_context}",
+                prompt,
+            ],
+        )
+        return response.text
+
+    async def integrate_units(units: List[str], final_prompt: str) -> str:
+        current_units = units
+        round_number = 1
+
+        while len("\n\n".join(current_units)) > settings.BATCH_SYNTHESIS_MAX_CHARS and len(current_units) > 1:
+            next_units = []
+            for group_index, start_index in enumerate(range(0, len(current_units), 3), start=1):
+                end_index = min(start_index + 3, len(current_units))
+                grouped_context = "\n\n".join(current_units[start_index:end_index])
+                intermediate_prompt = (
+                    f"{base_integration_prompt}\n\n"
+                    f"これは最終統合前の中間統合ラウンド {round_number} / グループ {group_index} です。"
+                    "短いサマリーではなく、この範囲の分割統合原稿をさらに1本の統合原稿へ編集してください。"
+                )
+                next_units.append(await synthesize_markdown(grouped_context, intermediate_prompt))
+            current_units = next_units
+            round_number += 1
+
+        return await synthesize_markdown("\n\n".join(current_units), final_prompt)
 
     if not files_to_process:
         print("[❌ 終了] バックグラウンドに渡されたファイルリストが空でした。")
-        return {"status": "EMPTY"}
+        return {"status": "EMPTY", "job_id": job_id}
 
-    is_gdrive = any(f.gdrive_file_id for f in files_to_process)
-    drive_service = get_gdrive_service() if is_gdrive else None
+    part_outputs = []
 
-    # --------------------------------------------------
-    # 🌟 【フェーズ 1】各個撃破（全画像の詳細な下読み ➔ ぶつ切りレポートの生成）
-    # --------------------------------------------------
-    print(f"[🚀 フェーズ1起動] 画像 {len(files_to_process)} 枚の並行下読みを開始します。")
-    tasks = [upload_and_process_with_retry(f, phase1_prompt, drive_service) for f in files_to_process]
-    intermediate_results = await asyncio.gather(*tasks)
-    
-    # 10枚分の「ぶつ切りレポート」をすべて合体させた巨大なデータプール
-    all_pages_context = "".join(intermediate_results)
-    
-    # --------------------------------------------------
-    # 🌟 【フェーズ 2】統合シンキング（一気読みして「本」に再構築）
-    # --------------------------------------------------
-    print("\n[🧠 フェーズ2：統合シンキング起動] 全ての下読みデータを回収しました。一冊の本として、もう一度熟読・再構成しています...")
-    
-    if custom_prompt:
-        synthesis_prompt = custom_prompt
-    else:
-        synthesis_prompt = (
-            "# 📚 書籍化・統合編集最高命令\n"
-            "高度な知識書籍の編集長、兼シニアAIエグゼクティブアナリストとして振る舞ってください。\n"
-            "以下に渡される「全ページ分の個別下読みデータ」のすべてを熟読・咀嚼してください。\n"
-            "全体のデータから浮かび上がる背景、共通するトレンド、本質的な知識を紡ぎ出し、"
-            "流れるような1本のシームレスな『完成された書籍（またはインテリジェンス白書）』としてMarkdown形式で大脱皮させてください。\n\n"
-            "## 📖 本の構成案:\n"
-            "1. **本のタイトル**: 収集された情報全体を象徴する、知的大ヒットを予感させる美しいタイトル（# タイトル）\n"
-            "2. **プロローグ（はじめに）**: この書籍（書類群）全体が扱っているテーマ、その背景と意義（## はじめに）\n"
-            "3. **核心的総括**: 全ページを横断して見えてきた、核心的な重要キーワードや共通するトレンド、重要な数字の統合まとめ（## 核心的総括）\n"
-            "4. **体系的な本文（章立て）**: 下読みデータを論理的に構造化し、流れるような文脈で整理した各論（## 各論：体系的分析）\n"
-            "5. **エピローグ（結びにかえて）**: 全体のデータを統合した結論、および未来への展望・総括（## 結論と今後の展望）\n\n"
-            "## 🎨 文体・執筆ルール:\n"
-            "- 完全に「である調（常体）」で統一し、学術書や高級ビジネス書としての品格を保つこと。\n"
-            "- 「解析しました」などのシステム的な前置きは一切禁止。そのまま出版できるクオリティにすること。"
-        )
+    try:
+        chunks = chunk_payloads(files_to_process, resolved_chunk_size)
+        total_chunks = len(chunks)
+        print(f"[🚀 バッチ起動] job_id={job_id} / 対象 {len(files_to_process)} 件 / {resolved_chunk_size}件ずつ {total_chunks} 分割で処理します。")
 
-    # Geminiに全データを渡して「2回目の超シンキング」
-    final_synthesis_response = client.models.generate_content(
-        model=settings.DEFAULT_MODEL_ID,
-        contents=[
-            f"■ 全ページ分の個別下読みデータ（素材）:\n\n{all_pages_context}",
-            synthesis_prompt
+        for chunk_index, chunk_files in enumerate(chunks, start=1):
+            print(f"[📦 分割 {chunk_index}/{total_chunks}] {len(chunk_files)} 件の下読みを開始します。")
+            tasks = [upload_and_process_with_retry(f, phase1_prompt) for f in chunk_files]
+            chunk_results = await asyncio.gather(*tasks)
+            chunk_context = "".join(chunk_results)
+            file_list = "\n".join(f"- {f.file_name}" for f in chunk_files)
+
+            part_prompt = (
+                f"{base_integration_prompt}\n\n"
+                f"これは全体 {total_chunks} 分割のうち {chunk_index} 番目の分割データです。"
+                "短いサマリーではなく、この分割範囲を読み物として成立する統合原稿にしてください。"
+                "後工程でこの分割統合原稿をさらに全体統合するため、重要な固有名詞、数値、論理関係を落とさないでください。"
+            )
+            part_integrated_markdown = await synthesize_markdown(chunk_context, part_prompt)
+            part_file_name = f"batch_{job_id}_part_{chunk_index:03d}_integrated.md"
+            part_document = (
+                f"# Batch {job_id} Part {chunk_index:03d}/{total_chunks:03d}\n\n"
+                f"## 対象ファイル\n\n{file_list}\n\n"
+                f"## 分割統合原稿\n\n{part_integrated_markdown}\n\n"
+                f"## 一次詳細解析データ\n\n{chunk_context}"
+            )
+            part_file_path = save_markdown_locally(part_file_name, part_document)
+            part_gdrive_result = None
+            if resolved_output_folder_id:
+                part_gdrive_result = upload_markdown_to_gdrive(
+                    file_name=part_file_name,
+                    content=part_document,
+                    folder_id=resolved_output_folder_id,
+                    drive_service=drive_service,
+                )
+            part_outputs.append({
+                "index": chunk_index,
+                "file_name": part_file_name,
+                "file_path": part_file_path,
+                "gdrive_output": part_gdrive_result,
+                "integrated_markdown": part_integrated_markdown,
+            })
+            print(f"[✅ 分割出力完了] {part_file_name}")
+            if part_gdrive_result:
+                print(f"[Google Drive part output]: {part_gdrive_result}")
+
+        print("[🧠 最終統合] 分割統合ファイル群を1本の完成原稿へ統合します。")
+        part_sources = [
+            f"## 分割統合ファイル {part['index']:03d}: {part['file_name']}\n\n{part['integrated_markdown']}"
+            for part in part_outputs
         ]
-    )
-    
-    final_book_markdown = final_synthesis_response.text
-
-    # --------------------------------------------------
-    # 🌟 【合体フェーズ】本編の後ろに「ぶつ切りレポート一覧」を完全ドッキング！
-    # --------------------------------------------------
-    complete_report_markdown = (
-        f"{final_book_markdown}\n\n"
-        f" \n\n"
-        f"# 📁 📘 付録（Appendix）：各ページの一次詳細解析データ一覧\n"
-        f"--- \n"
-        f"上記の『統合白書（本編）』を執筆するにあたり、AIエンジンが1枚1枚の画像データから"
-        f"事前にディープスキャンして抽出した、元データおよび証拠（エビデンス）の全記録です。検証用の生データとしてご活用ください。\n\n"
-        f"{all_pages_context}"
-    )
-
-    # --------------------------------------------------
-    # 💾 成果物の物理出荷（ローカル本棚保存）
-    # --------------------------------------------------
-    file_name = f"integrated_book_analysis_{uuid.uuid4().hex[:8]}.md"
-    file_path = os.path.join(OUTPUT_DIR, file_name)
-    
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(complete_report_markdown)
-
-    gdrive_result = None
-    resolved_output_folder_id = extract_gdrive_folder_id(output_folder_id or settings.GOOGLE_DRIVE_OUTPUT_FOLDER_ID)
-    if resolved_output_folder_id:
-        gdrive_result = upload_markdown_to_gdrive(
-            file_name=file_name,
-            content=complete_report_markdown,
-            folder_id=resolved_output_folder_id,
-            drive_service=drive_service,
+        final_prompt = (
+            f"{base_integration_prompt}\n\n"
+            "ここに渡される素材は、個別画像から作った分割統合原稿群です。"
+            "これらを単に要約せず、重複を整理し、章立てと論理の流れを整え、"
+            "1本の完成された統合Markdown原稿として再編集してください。"
+            "分割番号や処理都合は本文に残さず、自然な最終文書にしてください。"
         )
-        
-    elapsed = time.time() - start_time
-    print(f"\n[🎉 バッチ完全終了] 処理時間: {elapsed:.2f}秒")
-    print(f"[📂 保存先パス]: {file_path}")
-    print("成果物は『本編 ＋ ぶつ切り生データ付録』が合体した状態でローカル本棚に出荷されました！")
-    
-    if gdrive_result:
-        print(f"[Google Drive output]: {gdrive_result}")
+        final_book_markdown = await integrate_units(part_sources, final_prompt)
 
-    return {
-        "destination": file_path,
-        "gdrive_output": gdrive_result,
-        "processed_count": len(files_to_process),
-    }
+        part_links = "\n".join(
+            f"- [{part['file_name']}]({part['gdrive_output'].get('web_view_link')})"
+            if part["gdrive_output"] and part["gdrive_output"].get("web_view_link")
+            else f"- {part['file_name']}"
+            for part in part_outputs
+        )
+        final_file_name = f"batch_{job_id}_final_integrated.md"
+        final_document = (
+            f"{final_book_markdown}\n\n"
+            f"---\n\n"
+            f"# 分割統合ファイル一覧\n\n"
+            f"{part_links}\n"
+        )
+        final_file_path = save_markdown_locally(final_file_name, final_document)
+
+        final_gdrive_result = None
+        if resolved_output_folder_id:
+            final_gdrive_result = upload_markdown_to_gdrive(
+                file_name=final_file_name,
+                content=final_document,
+                folder_id=resolved_output_folder_id,
+                drive_service=drive_service,
+            )
+
+        elapsed = time.time() - start_time
+        print(f"\n[🎉 バッチ完全終了] job_id={job_id} / 処理時間: {elapsed:.2f}秒")
+        print(f"[📂 最終保存先パス]: {final_file_path}")
+        if final_gdrive_result:
+            print(f"[Google Drive final output]: {final_gdrive_result}")
+
+        return {
+            "status": "DONE",
+            "job_id": job_id,
+            "destination": final_file_path,
+            "gdrive_output": final_gdrive_result,
+            "part_outputs": part_outputs,
+            "processed_count": len(files_to_process),
+        }
+    except Exception as pipeline_err:
+        elapsed = time.time() - start_time
+        error_file_name = f"batch_{job_id}_error.md"
+        completed_parts = "\n".join(f"- {part['file_name']}" for part in part_outputs) or "- なし"
+        error_document = (
+            f"# Batch {job_id} Error Report\n\n"
+            f"- 処理件数: {len(files_to_process)}\n"
+            f"- 完了済み分割ファイル:\n{completed_parts}\n"
+            f"- 経過秒数: {elapsed:.2f}\n\n"
+            f"## エラー\n\n```text\n{str(pipeline_err)}\n```\n"
+        )
+        error_file_path = save_markdown_locally(error_file_name, error_document)
+        error_gdrive_result = None
+        if resolved_output_folder_id:
+            error_gdrive_result = upload_markdown_to_gdrive(
+                file_name=error_file_name,
+                content=error_document,
+                folder_id=resolved_output_folder_id,
+                drive_service=drive_service,
+            )
+        print(f"[❌ バッチ異常終了] job_id={job_id}: {str(pipeline_err)}")
+        if error_gdrive_result:
+            print(f"[Google Drive error output]: {error_gdrive_result}")
+        return {
+            "status": "ERROR",
+            "job_id": job_id,
+            "destination": error_file_path,
+            "gdrive_output": error_gdrive_result,
+            "processed_count": len(files_to_process),
+        }
 
 
 def prepare_batch_files(storage_type: str, target_path: str, limit_count: Optional[int] = None) -> Tuple[List[FilePayload], int, int]:

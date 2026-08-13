@@ -269,6 +269,7 @@ async def batch_process_documents(
     storage_type: str = Form(default="google_drive"),
     target_path: str = Form(default=""),
     limit_count: Optional[int] = Form(default=None),
+    chunk_size: Optional[int] = Form(default=None),
     prompt_preset: str = Form(default="ocr_markdown"),
     custom_prompt: Optional[str] = Form(default=None),
     output_folder_id: Optional[str] = Form(default=None)
@@ -299,21 +300,30 @@ async def batch_process_documents(
     if actual_to_process == 0:
         raise HTTPException(status_code=400, detail="対象ファイルがありません。")
 
+    job_id = uuid.uuid4().hex[:8]
+    resolved_chunk_size = max(1, chunk_size or settings.BATCH_CHUNK_SIZE)
+
     background_tasks.add_task(
         start_enterprise_batch_pipeline,
         files_to_process,
         prompt_preset,
         custom_prompt,
         resolved_output_folder_id,
+        job_id,
+        resolved_chunk_size,
     )
     return {
         "status": "accepted",
+        "job_id": job_id,
+        "message": "処理中は出力Driveフォルダに batch_<job_id>_part_XXX_integrated.md が順次保存され、最後に batch_<job_id>_final_integrated.md が保存されます。",
         "storage_info": {
             "storage_type": storage_type,
             "input_folder_id": extract_gdrive_folder_id(resolved_target_path) if storage_type == "google_drive" else resolved_target_path,
             "total_files_found": total_found,
             "actual_files_to_process": actual_to_process,
             "output_folder_id": resolved_output_folder_id,
+            "chunk_size": resolved_chunk_size,
+            "expected_part_files": (actual_to_process + resolved_chunk_size - 1) // resolved_chunk_size,
         }
     }
 
