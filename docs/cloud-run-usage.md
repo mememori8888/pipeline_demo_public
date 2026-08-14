@@ -42,10 +42,13 @@ curl -H "X-API-Key: $APP_API_KEY" \
 
 Large runs are written in stages:
 
-- `batch_<job_id>_part_001_integrated.md`, `batch_<job_id>_part_002_integrated.md`, ... are uploaded as each chunk finishes.
-- `batch_<job_id>_final_integrated.md` is uploaded at the end. This is an integrated document built from the split integrated files, not a short summary.
+- `batch_<job_id>_part_001_integrated.md`, `batch_<job_id>_part_002_integrated.md`, ... are temporary intermediate files uploaded as each chunk finishes.
+- The final Markdown is uploaded at the end with a content-based file name derived from the generated document title, for example `<document-title>_<job_id>.md`. This is the one-file integrated document built from the split integrated files, not a short summary.
+- By default, temporary `part_XXX` files are moved to Google Drive trash after the final file is created. Set `BATCH_KEEP_PART_FILES=true` only when you intentionally want to keep intermediate files for review.
 
 The default large-batch mode is intentionally low-load: one Gemini page analysis at a time, `chunk_size=3`, a short pause between files, and a pause between chunk uploads. This is slower but avoids sudden API spikes.
+
+For full-folder runs, configure `CLOUD_RUN_BATCH_JOB_NAME` so `POST /api/v1/document/batch-process` starts a Cloud Run Job instead of relying on an HTTP background task. Cloud Run Jobs are the safer Cloud Run-only path for long processing because the work runs to completion independently of the web request.
 
 The operator console at `https://pipeline-demo-api-xebbfpgofa-an.a.run.app/` provides the same flow with buttons:
 
@@ -68,5 +71,5 @@ powershell -ExecutionPolicy Bypass -File scripts\cloudrun_batch_start.ps1 -Chunk
 ## Useful Endpoints
 
 - `GET /api/v1/drive/status`: confirms the service account can see the input folder and write to the output folder.
-- `POST /api/v1/document/batch-process`: starts Google Drive document processing in the background.
+- `POST /api/v1/document/batch-process`: starts Google Drive document processing. When `CLOUD_RUN_BATCH_JOB_NAME` is configured, this starts a Cloud Run Job for long full-folder runs.
 - `POST /api/v1/document/youtube-channel-process`: starts YouTube channel report generation in the background.

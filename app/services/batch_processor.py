@@ -83,6 +83,66 @@ def upload_markdown_to_gdrive(file_name: str, content: str, folder_id: str, driv
     }
 
 
+def trash_gdrive_file(file_id: Optional[str], drive_service=None) -> Optional[dict]:
+    if not file_id:
+        return None
+    service = drive_service or get_gdrive_service()
+    trashed = service.files().update(
+        fileId=file_id,
+        body={"trashed": True},
+        fields="id, name, trashed",
+        supportsAllDrives=True,
+    ).execute()
+    return {
+        "file_id": trashed.get("id"),
+        "file_name": trashed.get("name"),
+        "trashed": trashed.get("trashed"),
+    }
+
+
+def remove_local_file(file_path: Optional[str]) -> bool:
+    if not file_path:
+        return False
+    try:
+        os.remove(file_path)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def extract_markdown_title(markdown_text: str) -> Optional[str]:
+    for raw_line in markdown_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("# "):
+            return line.lstrip("#").strip()
+    for raw_line in markdown_text.splitlines():
+        line = raw_line.strip()
+        if line:
+            return line.lstrip("#").strip()
+    return None
+
+
+def sanitize_drive_filename_stem(raw_title: Optional[str], fallback: str, max_length: int = 80) -> str:
+    title = (raw_title or fallback).strip()
+    title = re.sub(r"[*_`~]+", "", title)
+    title = re.sub(r"[\\/:*?\"<>|\r\n\t]+", " ", title)
+    title = re.sub(r"\s+", " ", title).strip(" .")
+    if not title:
+        title = fallback
+    if len(title) > max_length:
+        title = title[:max_length].rstrip(" .")
+    return title or fallback
+
+
+def build_content_based_final_file_name(markdown_text: str, job_id: str) -> str:
+    title = extract_markdown_title(markdown_text)
+    fallback = f"integrated_book_{job_id}"
+    title_stem = sanitize_drive_filename_stem(title, fallback)
+    return f"{title_stem}_{job_id}.md"
+
+
 def save_markdown_locally(file_name: str, content: str) -> str:
     file_path = os.path.join(OUTPUT_DIR, file_name)
     with open(file_path, "w", encoding="utf-8") as f:
@@ -407,18 +467,28 @@ async def start_enterprise_batch_pipeline(
         )
         final_book_markdown = await integrate_units(part_sources, final_prompt)
 
-        part_links = "\n".join(
-            f"- [{part['file_name']}]({part['gdrive_output'].get('web_view_link')})"
-            if part["gdrive_output"] and part["gdrive_output"].get("web_view_link")
-            else f"- {part['file_name']}"
-            for part in part_outputs
-        )
-        final_file_name = f"batch_{job_id}_final_integrated.md"
+        keep_part_files = settings.BATCH_KEEP_PART_FILES
+        if keep_part_files:
+            part_reference_section = (
+                "# Temporary part files\n\n"
+                + "\n".join(
+                    f"- [{part['file_name']}]({part['gdrive_output'].get('web_view_link')})"
+                    if part["gdrive_output"] and part["gdrive_output"].get("web_view_link")
+                    else f"- {part['file_name']}"
+                    for part in part_outputs
+                )
+            )
+        else:
+            part_reference_section = (
+                "# Temporary part files\n\n"
+                "The split part files were used only as intermediate material for this final integrated document. "
+                "They are moved to the Google Drive trash after this final file is saved."
+            )
+        final_file_name = build_content_based_final_file_name(final_book_markdown, job_id)
         final_document = (
             f"{final_book_markdown}\n\n"
             f"---\n\n"
-            f"# 分割統合ファイル一覧\n\n"
-            f"{part_links}\n"
+            f"{part_reference_section}\n"
         )
         final_file_path = save_markdown_locally(final_file_name, final_document)
 
@@ -437,12 +507,34 @@ async def start_enterprise_batch_pipeline(
         if final_gdrive_result:
             print(f"[Google Drive final output]: {final_gdrive_result}")
 
+        cleanup_results = []
+        if not keep_part_files:
+            for part in part_outputs:
+                part_cleanup = {
+                    "file_name": part.get("file_name"),
+                    "local_removed": remove_local_file(part.get("file_path")),
+                    "gdrive_trashed": None,
+                    "error": None,
+                }
+                try:
+                    gdrive_file_id = (part.get("gdrive_output") or {}).get("file_id")
+                    part_cleanup["gdrive_trashed"] = trash_gdrive_file(
+                        gdrive_file_id,
+                        drive_service=drive_service,
+                    )
+                except Exception as cleanup_err:
+                    part_cleanup["error"] = str(cleanup_err)
+                    print(f"[Part cleanup warning] {part.get('file_name')}: {cleanup_err}")
+                cleanup_results.append(part_cleanup)
+            print(f"[Part cleanup done] {len(cleanup_results)} temporary part files handled")
+
         return {
             "status": "DONE",
             "job_id": job_id,
             "destination": final_file_path,
             "gdrive_output": final_gdrive_result,
             "part_outputs": part_outputs,
+            "part_cleanup": cleanup_results,
             "processed_count": len(files_to_process),
         }
     except Exception as pipeline_err:

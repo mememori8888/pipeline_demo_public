@@ -2,10 +2,12 @@ import os
 import json
 import uuid
 import secrets
+import google.auth
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
+from google.auth.transport.requests import AuthorizedSession
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional
 
@@ -41,6 +43,52 @@ async def require_api_key(api_key: Optional[str] = Security(api_key_header)) -> 
         return
     if not api_key or not secrets.compare_digest(api_key, expected_key):
         raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
+
+
+def cloud_run_batch_job_enabled() -> bool:
+    return bool(settings.CLOUD_RUN_BATCH_JOB_NAME.strip())
+
+
+def run_cloud_run_batch_job(args: list[str]) -> Dict[str, Any]:
+    project_id = (
+        settings.CLOUD_RUN_PROJECT_ID
+        or os.getenv("GOOGLE_CLOUD_PROJECT")
+        or os.getenv("GCP_PROJECT")
+    )
+    region = settings.CLOUD_RUN_REGION
+    job_name = settings.CLOUD_RUN_BATCH_JOB_NAME
+    if not project_id:
+        raise HTTPException(status_code=500, detail="CLOUD_RUN_PROJECT_ID is required to run the batch job")
+    if not region:
+        raise HTTPException(status_code=500, detail="CLOUD_RUN_REGION is required to run the batch job")
+    if not job_name:
+        raise HTTPException(status_code=500, detail="CLOUD_RUN_BATCH_JOB_NAME is required to run the batch job")
+
+    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    session = AuthorizedSession(credentials)
+    url = f"https://run.googleapis.com/v2/projects/{project_id}/locations/{region}/jobs/{job_name}:run"
+    payload = {
+        "overrides": {
+            "containerOverrides": [
+                {
+                    "args": args,
+                }
+            ],
+            "taskCount": 1,
+            "timeout": f"{max(60, settings.CLOUD_RUN_BATCH_JOB_TIMEOUT_SECONDS)}s",
+        }
+    }
+    response = session.post(url, json=payload, timeout=30)
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Cloud Run batch job could not be started",
+                "status_code": response.status_code,
+                "body": response.text,
+            },
+        )
+    return response.json()
 
 
 def health_payload():
@@ -302,6 +350,52 @@ async def batch_process_documents(
 
     job_id = uuid.uuid4().hex[:8]
     resolved_chunk_size = max(1, chunk_size or settings.BATCH_CHUNK_SIZE)
+
+    if storage_type == "google_drive" and cloud_run_batch_job_enabled():
+        job_args = [
+            "-m",
+            "app.cli.drive_batch",
+            "--target-path",
+            extract_gdrive_folder_id(resolved_target_path) if storage_type == "google_drive" else resolved_target_path,
+            "--output-folder-id",
+            resolved_output_folder_id or "",
+            "--limit-count",
+            str(limit_count or 0),
+            "--chunk-size",
+            str(resolved_chunk_size),
+            "--prompt-preset",
+            prompt_preset,
+            "--job-id",
+            job_id,
+        ]
+        if custom_prompt:
+            job_args.extend(["--custom-prompt", custom_prompt])
+        execution = run_cloud_run_batch_job(job_args)
+        execution_metadata = execution.get("metadata") or {}
+        execution_name = (execution_metadata.get("name") or "").split("/")[-1]
+        return {
+            "status": "job_started",
+            "job_id": job_id,
+            "message": "Cloud Run Job started. The final integrated Markdown file will be saved to the output Drive folder. Temporary part files are removed after the final file is created.",
+            "cloud_run_job": {
+                "project_id": settings.CLOUD_RUN_PROJECT_ID,
+                "region": settings.CLOUD_RUN_REGION,
+                "job_name": settings.CLOUD_RUN_BATCH_JOB_NAME,
+                "operation": execution.get("name"),
+                "execution_name": execution_name,
+                "log_uri": execution_metadata.get("logUri"),
+                "create_time": execution_metadata.get("createTime"),
+            },
+            "storage_info": {
+                "storage_type": storage_type,
+                "input_folder_id": extract_gdrive_folder_id(resolved_target_path) if storage_type == "google_drive" else resolved_target_path,
+                "total_files_found": total_found,
+                "actual_files_to_process": actual_to_process,
+                "output_folder_id": resolved_output_folder_id,
+                "chunk_size": resolved_chunk_size,
+                "expected_part_files": (actual_to_process + resolved_chunk_size - 1) // resolved_chunk_size,
+            }
+        }
 
     background_tasks.add_task(
         start_enterprise_batch_pipeline,
