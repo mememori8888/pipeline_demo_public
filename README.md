@@ -38,7 +38,7 @@ FastAPIが吐き出す OpenAPI 仕様書（/openapi.json）を Retool にイン�
 🟥 フェーズ5：Google Cloud Run への本番マルチテナントデプロイ
 [ ] 本番環境へのローンチ
 
-.env にある本番用の GEMINI_API_KEY や ENCRYPTION_KEY などの秘匿情報を、Google Cloud の Secret Manager へ安全に移管。
+Gemini は Cloud Run のサービスアカウントから Vertex AI / Gemini を呼び出す。Cloud Run 本番では `GEMINI_API_KEY` を使わず、`GOOGLE_CLOUD_PROJECT`、`GOOGLE_CLOUD_LOCATION`、サービスアカウントの IAM 権限で認証する。`ENCRYPTION_KEY` や `APP_API_KEY` などの秘匿情報は Google Cloud の Secret Manager へ安全に移管する。
 
 本番用 Dockerfile を作成し、Google Cloud Run へステートレスな超高速スケーリングコンテナとしてデプロイ。OEM/SaaS従量課金ビジネスの正式運用を開始する。
 """

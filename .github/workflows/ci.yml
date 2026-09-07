@@ -13,9 +13,10 @@ jobs:
     name: FastAPI CI
     runs-on: ubuntu-latest
     env:
-      GEMINI_API_KEY: "dummy-ci-key"
       ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef"
       APP_API_KEY: "dummy-ci-app-key"
+      GOOGLE_CLOUD_PROJECT: "dummy-ci-project"
+      GOOGLE_CLOUD_LOCATION: "global"
       SQLITE_DB_PATH: "/tmp/shared_tenant_store.db"
       CHROMA_DB_DIR: "/tmp/chroma_vector_store"
       GOOGLE_DRIVE_INPUT_FOLDER_ID: ""
@@ -49,7 +50,7 @@ jobs:
           API_PID=$!
           trap "kill $API_PID" EXIT
           for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:8080/healthz; then
+            if curl -fsS http://127.0.0.1:8080/healthz && curl -fsS http://127.0.0.1:8080/api/healthz; then
               exit 0
             fi
             sleep 1

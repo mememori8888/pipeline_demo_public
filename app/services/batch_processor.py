@@ -8,20 +8,14 @@ import re
 from typing import List, Optional, Tuple
 from pydantic import BaseModel
 import google.auth
-from google import genai
 from google.genai import types
 from app.core.config import settings
+from app.services.gemini_client import get_gemini_client
 
 # Google公式 API クライアントライブラリ
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2 import service_account
-
-# Gemini API クライアントの初期化
-client = genai.Client(
-    api_key=settings.GEMINI_API_KEY,
-    http_options=types.HttpOptions(timeout=settings.GEMINI_HTTP_TIMEOUT_MS),
-)
 
 # 成果物を格納するローカルの安全な本棚フォルダ
 OUTPUT_DIR = "output_txts"
@@ -272,6 +266,7 @@ async def generate_content_text_with_retry(contents_input, purpose: str, max_ret
     for attempt in range(max_retries):
         try:
             print(f"[Gemini start] {purpose} ({attempt + 1}/{max_retries})")
+            client = get_gemini_client()
             response = await asyncio.to_thread(
                 client.models.generate_content,
                 model=settings.DEFAULT_MODEL_ID,

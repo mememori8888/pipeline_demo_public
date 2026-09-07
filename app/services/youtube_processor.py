@@ -4,16 +4,14 @@ import uuid
 import time
 import re
 from typing import List, Optional, Tuple
-from google import genai
-from google.genai import errors
 from pydantic import BaseModel
 from app.core.config import settings
+from app.services.gemini_client import get_gemini_client
 
 # Google公式のYouTube APIクライアント
 from googleapiclient.discovery import build
 from app.services.batch_processor import extract_gdrive_folder_id, upload_markdown_to_gdrive
 
-client = genai.Client(api_key=settings.GEMINI_API_KEY)
 OUTPUT_DIR = "output_txts"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -115,6 +113,7 @@ async def summarize_single_video(video: YouTubeVideoPayload) -> Tuple[str, int, 
         
         for attempt in range(max_retries):
             try:
+                client = get_gemini_client()
                 response = client.models.generate_content(model=settings.DEFAULT_MODEL_ID, contents=prompt)
                 in_tokens = response.usage_metadata.prompt_token_count or 0
                 out_tokens = response.usage_metadata.candidates_token_count or 0
@@ -213,6 +212,7 @@ async def start_youtube_channel_pipeline(
         
         for attempt in range(max_retries):
             try:
+                client = get_gemini_client()
                 macro_response = client.models.generate_content(
                     model=model_name, 
                     contents=[

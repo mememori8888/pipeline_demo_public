@@ -220,17 +220,18 @@ Cloud Run の前段に Load Balancer + serverless NEG を試したが、Cloud Ru
 
 以下の実値は repository に入れない。
 
-- `GEMINI_API_KEY`
 - `YOUTUBE_API_KEY`
 - `ENCRYPTION_KEY`
 - `APP_API_KEY`
 - `service_account.json`
 
+Gemini は Cloud Run のサービスアカウントから Vertex AI / Gemini を呼び出すため、Cloud Run 本番では `GEMINI_API_KEY` を使わない。Cloud Run には `GOOGLE_CLOUD_PROJECT` と `GOOGLE_CLOUD_LOCATION` を設定し、サービスアカウントに `roles/aiplatform.user` を付与する。
+
 GitHub Actions 用には GitHub Secrets を使う。Cloud Run では環境変数として渡している。
 
 ### API キーのローテーション
 
-作業中に Cloud Run の設定確認などで一部環境変数がコマンド出力に表示された可能性がある。実運用では Gemini / YouTube / APP API key のローテーションを推奨する。
+作業中に Cloud Run の設定確認などで一部環境変数がコマンド出力に表示された可能性がある。実運用では YouTube / APP API key のローテーションを推奨する。旧 `GEMINI_API_KEY` が残っている場合は、Vertex AI / IAM への切り替え確認後に削除する。
 
 ### Cloud Run 直公開
 

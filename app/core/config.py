@@ -4,9 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
 
 class Settings(BaseSettings):
-    # 【🔥絶対ガード：古いキーのハードコードを完全消去】
-    # default値を設定せず必須（...）にすることで、.envから読み込めない場合は起動時に強制停止させます
-    GEMINI_API_KEY: str = Field(..., description="Google Gemini API Key")
+    # Gemini is called through Vertex AI / Cloud Run IAM. This legacy key is
+    # kept optional so old local .env files do not break settings loading.
+    GEMINI_API_KEY: str = Field(default="", description="Deprecated: legacy AI Studio Gemini API Key")
     
     # 🌟【新設】YouTube用のAPIキー（未セットの場合は空文字を許容して安全にフォールバック）
     YOUTUBE_API_KEY: str = Field(default="", description="YouTube Data API Key")
@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     CHROMA_DB_DIR: str = Field(default="./chroma_vector_store")
     GOOGLE_DRIVE_INPUT_FOLDER_ID: str = Field(default="")
     GOOGLE_DRIVE_OUTPUT_FOLDER_ID: str = Field(default="")
+    GOOGLE_CLOUD_PROJECT: str = Field(default="", description="Google Cloud project used for Vertex AI Gemini calls")
+    GOOGLE_CLOUD_LOCATION: str = Field(default="global", description="Google Cloud location used for Vertex AI Gemini calls")
     CLOUD_RUN_PROJECT_ID: str = Field(default="", description="Google Cloud project that owns the optional Cloud Run batch job")
     CLOUD_RUN_REGION: str = Field(default="asia-northeast1", description="Region that owns the optional Cloud Run batch job")
     CLOUD_RUN_BATCH_JOB_NAME: str = Field(default="", description="Optional Cloud Run Job name for long Google Drive batches")
@@ -44,6 +46,8 @@ class Settings(BaseSettings):
         "APP_API_KEY",
         "GOOGLE_DRIVE_INPUT_FOLDER_ID",
         "GOOGLE_DRIVE_OUTPUT_FOLDER_ID",
+        "GOOGLE_CLOUD_PROJECT",
+        "GOOGLE_CLOUD_LOCATION",
         "CLOUD_RUN_PROJECT_ID",
         "CLOUD_RUN_REGION",
         "CLOUD_RUN_BATCH_JOB_NAME",
@@ -72,12 +76,13 @@ except Exception as e:
     print(f"詳細エラー: {str(e)}")
     print("\n[原因]")
     print("プロジェクトのルート（appフォルダと同じ階層）に「.env」ファイルが存在しないか、")
-    print("中に有効な『GEMINI_API_KEY』が記述されていません。")
+    print("中に有効な『ENCRYPTION_KEY』などの必須環境変数が記述されていません。")
     print("\n[対策]")
     print("1. ルート階層に「.env」という名前のファイルを新規作成してください。")
     print("2. ファイル内に以下のように記述して保存してください（※前後に余計な文字や空白を入れない）")
-    print('   GEMINI_API_KEY="あなたの最新のGeminiAPIキー"')
     print('   ENCRYPTION_KEY="your-32-byte-encryption-key"')
+    print('   GOOGLE_CLOUD_PROJECT="your-gcp-project-id"')
+    print('   GOOGLE_CLOUD_LOCATION="global"')
     print('   YOUTUBE_API_KEY="あなたのYouTube APIキー（任意）"')
     print("="*60 + "\n")
     sys.exit(1)

@@ -8,9 +8,10 @@ jobs:
     name: Google Drive smoke test
     runs-on: ubuntu-latest
     env:
-      GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}"
       ENCRYPTION_KEY: "${{ secrets.ENCRYPTION_KEY }}"
       YOUTUBE_API_KEY: "${{ secrets.YOUTUBE_API_KEY }}"
+      GOOGLE_CLOUD_PROJECT: "${{ secrets.GCP_PROJECT_ID }}"
+      GOOGLE_CLOUD_LOCATION: "global"
       GOOGLE_DRIVE_INPUT_FOLDER_ID: "${{ secrets.GOOGLE_DRIVE_INPUT_FOLDER_ID }}"
       GOOGLE_DRIVE_OUTPUT_FOLDER_ID: "${{ secrets.GOOGLE_DRIVE_OUTPUT_FOLDER_ID }}"
       GOOGLE_APPLICATION_CREDENTIALS: "/tmp/service_account.json"

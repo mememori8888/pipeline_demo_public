@@ -1,9 +1,9 @@
 import json
 from typing import Dict, Any, Tuple
 from pydantic import BaseModel, Field
-from google import genai
 from google.genai import types
 from app.core.config import settings
+from app.services.gemini_client import get_gemini_client
 
 # --- フールプルーフのためのスキーマ生成用Pydantic定義 ---
 class SchemaProperty(BaseModel):
@@ -21,9 +21,11 @@ class GeminiSaaSFactory:
     """Gemini 2.5の最新機能をマルチテナント向けにカプセル化したAIファクトリー"""
 
     def __init__(self):
-        # 最新SDKクライアント初期化
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         self.model_id = settings.DEFAULT_MODEL_ID
+
+    @property
+    def client(self):
+        return get_gemini_client()
 
     def generate_schema_from_document(self, masked_sample_text: str) -> Tuple[str, Dict[str, Any], str]:
         """

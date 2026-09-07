@@ -28,6 +28,22 @@ curl -H "X-API-Key: $APP_API_KEY" \
   https://pipeline-demo-api-xebbfpgofa-an.a.run.app/api/v1/drive/status
 ```
 
+## Gemini Authentication
+
+Gemini calls use Vertex AI through the Cloud Run service identity. Do not set
+`GEMINI_API_KEY` on Cloud Run for production use.
+
+Required Cloud Run environment variables:
+
+- `GOOGLE_CLOUD_PROJECT`: Google Cloud project ID used for Vertex AI / Gemini.
+- `GOOGLE_CLOUD_LOCATION`: `global` by default.
+
+Required Google Cloud setup:
+
+- Enable `aiplatform.googleapis.com`.
+- Grant the Cloud Run service and job service account `roles/aiplatform.user`.
+- Use the same service account for Drive access, and share the input/output Drive folders with that service account email.
+
 ## Google Drive Batch Processing
 
 1. Put PDFs, images, or text files into the configured input Drive folder.
