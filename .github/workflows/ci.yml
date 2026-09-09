@@ -44,6 +44,9 @@ jobs:
       - name: Import FastAPI app
         run: python -c "from app.main import app; print(app.title); print(len(app.routes))"
 
+      - name: Run unit tests
+        run: python -m unittest tests.test_batch_title_helpers
+
       - name: Start API and check health
         run: |
           uvicorn app.main:app --host 127.0.0.1 --port 8080 &

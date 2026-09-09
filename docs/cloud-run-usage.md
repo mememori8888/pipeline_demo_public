@@ -59,7 +59,7 @@ Required Google Cloud setup:
 Large runs are written in stages:
 
 - `batch_<job_id>_part_001_integrated.md`, `batch_<job_id>_part_002_integrated.md`, ... are temporary intermediate files uploaded as each chunk finishes.
-- The final Markdown is uploaded at the end with a content-based file name derived from the generated document title, for example `<document-title>_<job_id>.md`. This is the one-file integrated document built from the split integrated files, not a short summary.
+- The final Markdown is uploaded at the end with an AI-generated Japanese title based on the integrated transcription content, for example `<Japanese-title>_<job_id>.md`. The first H1 in the Markdown uses the same title. This is the one-file integrated document built from the split integrated files, not a short summary.
 - By default, temporary `part_XXX` files are moved to Google Drive trash after the final file is created. Set `BATCH_KEEP_PART_FILES=true` only when you intentionally want to keep intermediate files for review.
 
 The default large-batch mode is intentionally low-load: one Gemini page analysis at a time, `chunk_size=3`, a short pause between files, and a pause between chunk uploads. This is slower but avoids sudden API spikes.

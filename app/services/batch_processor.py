@@ -118,9 +118,25 @@ def extract_markdown_title(markdown_text: str) -> Optional[str]:
     return None
 
 
+def clean_generated_title(raw_title: Optional[str], fallback: str, max_length: int = 80) -> str:
+    title = (raw_title or "").strip()
+    title = re.sub(r"^```(?:\w+)?", "", title).strip()
+    title = re.sub(r"```$", "", title).strip()
+    title_lines = [line.strip() for line in title.splitlines() if line.strip()]
+    title = title_lines[0] if title_lines else ""
+    title = re.sub(r"^(?:#+\s*|[-*]\s*)+", "", title).strip()
+    title = title.strip("\"'「」『』“”‘’`*_ ")
+    title = re.sub(r"\s+", " ", title).strip()
+    if not title:
+        title = fallback
+    if len(title) > max_length:
+        title = title[:max_length].rstrip(" .。、「『")
+    return title or fallback
+
+
 def sanitize_drive_filename_stem(raw_title: Optional[str], fallback: str, max_length: int = 80) -> str:
     title = (raw_title or fallback).strip()
-    title = re.sub(r"[*_`~]+", "", title)
+    title = re.sub(r"[*`~]+", "", title)
     title = re.sub(r"[\\/:*?\"<>|\r\n\t]+", " ", title)
     title = re.sub(r"\s+", " ", title).strip(" .")
     if not title:
@@ -130,11 +146,79 @@ def sanitize_drive_filename_stem(raw_title: Optional[str], fallback: str, max_le
     return title or fallback
 
 
-def build_content_based_final_file_name(markdown_text: str, job_id: str) -> str:
-    title = extract_markdown_title(markdown_text)
-    fallback = f"integrated_book_{job_id}"
+def build_content_based_final_file_name(
+    markdown_text: str,
+    job_id: str,
+    preferred_title: Optional[str] = None,
+) -> str:
+    title = preferred_title or extract_markdown_title(markdown_text)
+    fallback = "integrated_book"
     title_stem = sanitize_drive_filename_stem(title, fallback)
     return f"{title_stem}_{job_id}.md"
+
+
+def ensure_markdown_h1(markdown_text: str, title: str) -> str:
+    safe_title = clean_generated_title(title, "統合ドキュメント")
+    body = markdown_text.strip()
+    if not body:
+        return f"# {safe_title}\n"
+
+    lines = body.splitlines()
+    cleaned_lines = []
+    removed_first_h1 = False
+    for line in lines:
+        if not removed_first_h1 and line.strip().startswith("# "):
+            removed_first_h1 = True
+            continue
+        cleaned_lines.append(line)
+
+    cleaned_body = "\n".join(cleaned_lines).strip()
+    if not cleaned_body:
+        return f"# {safe_title}\n"
+    return f"# {safe_title}\n\n{cleaned_body}\n"
+
+
+def truncate_title_context(text: str, max_chars: int = 12000) -> str:
+    if len(text) <= max_chars:
+        return text
+    head_chars = max_chars * 2 // 3
+    tail_chars = max_chars - head_chars
+    return f"{text[:head_chars]}\n\n...[中略]...\n\n{text[-tail_chars:]}"
+
+
+async def generate_japanese_document_title(
+    final_markdown: str,
+    source_file_names: List[str],
+    job_id: str,
+) -> str:
+    fallback = f"integrated_book_{job_id}"
+    file_list = "\n".join(f"- {name}" for name in source_file_names[:100])
+    if len(source_file_names) > 100:
+        file_list += f"\n- ...ほか {len(source_file_names) - 100} 件"
+    title_prompt = (
+        "# 日本語タイトル生成命令\n"
+        "あなたは書籍編集者です。渡された統合Markdown本文と処理元ファイル名を読み、"
+        "内容にもっとも沿った日本語の書籍タイトルを1つだけ作成してください。\n\n"
+        "## 厳守条件\n"
+        "- 日本語のみで書くこと。\n"
+        "- 1行だけ出力すること。\n"
+        "- Markdown記法、引用符、説明文、候補一覧を書かないこと。\n"
+        "- 内容の本質が伝わる自然なタイトルにすること。\n"
+        "- Google Driveのファイル名として使いやすい長さにすること。\n"
+    )
+    try:
+        response_text = await generate_content_text_with_retry(
+            [
+                f"■ 処理元ファイル名:\n{file_list}\n\n"
+                f"■ 統合Markdown本文:\n{truncate_title_context(final_markdown)}",
+                title_prompt,
+            ],
+            purpose="title",
+        )
+        return clean_generated_title(response_text, fallback)
+    except Exception as title_err:
+        print(f"[Title generation warning] {title_err}")
+        return fallback
 
 
 def save_markdown_locally(file_name: str, content: str) -> str:
@@ -461,6 +545,13 @@ async def start_enterprise_batch_pipeline(
             "分割番号や処理都合は本文に残さず、自然な最終文書にしてください。"
         )
         final_book_markdown = await integrate_units(part_sources, final_prompt)
+        generated_title = await generate_japanese_document_title(
+            final_book_markdown,
+            [file.file_name for file in files_to_process],
+            job_id,
+        )
+        print(f"Generated final Japanese title: {generated_title}")
+        final_book_markdown = ensure_markdown_h1(final_book_markdown, generated_title)
 
         keep_part_files = settings.BATCH_KEEP_PART_FILES
         if keep_part_files:
@@ -479,7 +570,7 @@ async def start_enterprise_batch_pipeline(
                 "The split part files were used only as intermediate material for this final integrated document. "
                 "They are moved to the Google Drive trash after this final file is saved."
             )
-        final_file_name = build_content_based_final_file_name(final_book_markdown, job_id)
+        final_file_name = build_content_based_final_file_name(final_book_markdown, job_id, generated_title)
         final_document = (
             f"{final_book_markdown}\n\n"
             f"---\n\n"

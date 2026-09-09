@@ -376,7 +376,7 @@ async def batch_process_documents(
         return {
             "status": "job_started",
             "job_id": job_id,
-            "message": "Cloud Run Job started. The final integrated Markdown file will be saved to the output Drive folder. Temporary part files are removed after the final file is created.",
+            "message": "Cloud Run Job started. The final integrated Markdown file will be saved to the output Drive folder with an AI-generated Japanese title. Temporary part files are removed after the final file is created.",
             "cloud_run_job": {
                 "project_id": settings.CLOUD_RUN_PROJECT_ID,
                 "region": settings.CLOUD_RUN_REGION,
@@ -409,7 +409,7 @@ async def batch_process_documents(
     return {
         "status": "accepted",
         "job_id": job_id,
-        "message": "処理中は出力Driveフォルダに batch_<job_id>_part_XXX_integrated.md が順次保存され、最後に batch_<job_id>_final_integrated.md が保存されます。",
+        "message": "処理中は出力Driveフォルダに batch_<job_id>_part_XXX_integrated.md が順次保存され、最後にAI生成の日本語タイトルを付けた最終Markdownが保存されます。",
         "storage_info": {
             "storage_type": storage_type,
             "input_folder_id": extract_gdrive_folder_id(resolved_target_path) if storage_type == "google_drive" else resolved_target_path,
